@@ -6,47 +6,64 @@
     <title>Video Uploader</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <style>
-        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f0f0f0; }
-        .controls { display: flex; flex-direction: column; gap: 20px; width: 80%; max-width: 400px; }
-        button { padding: 15px; font-size: 16px; cursor: pointer; border-radius: 8px; border: none; background: #007bff; color: white; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8f9fa; color: #333; }
+        .container { width: 90%; max-width: 400px; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+        h2 { margin-top: 0; font-size: 1.2rem; color: #007aff; text-align: center; }
+        .field { margin-bottom: 20px; }
+        label { display: block; font-size: 0.9rem; font-weight: bold; margin-bottom: 8px; }
+        select, button { width: 100%; padding: 12px; font-size: 16px; border-radius: 10px; border: 1px solid #ddd; }
+        button { background: #007aff; color: white; border: none; font-weight: bold; cursor: pointer; transition: background 0.3s; margin-top: 10px; }
+        button:active { background: #0056b3; }
         button:disabled { background: #ccc; }
-        select { padding: 10px; font-size: 16px; border-radius: 8px; }
+        #status { margin-top: 15px; font-size: 0.85rem; color: #666; text-align: center; word-break: break-all; min-height: 3em; }
+        
         /* 暗転用オーバーレイ */
         #overlay {
             display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-            background: black; z-index: 9999; color: #333; display: none; align-items: center; justify-content: center;
+            background: black; z-index: 9999; flex-direction: column; align-items: center; justify-content: center;
         }
     </style>
 </head>
 <body>
 
-    <div class="controls">
-        <h2>録画設定</h2>
-        <label>カメラ選択:</label>
-        <select id="cameraSelect">
-            <option value="environment">背面カメラ</option>
-            <option value="user">前面カメラ</option>
-        </select>
+    <div class="container">
+        <h2>Video Uploader</h2>
+        
+        <div class="field">
+            <label>カメラ</label>
+            <select id="cameraSelect">
+                <option value="environment">背面カメラ (Outer)</option>
+                <option value="user">前面カメラ (Inner)</option>
+            </select>
+        </div>
 
-        <label>録画時間:</label>
-        <select id="durationSelect">
-            <option value="1">1分</option>
-            <option value="3">3分</option>
-            <option value="5">5分</option>
-            <option value="10">10分</option>
-        </select>
+        <div class="field">
+            <label>録画時間 (1分ごとに送信)</label>
+            <select id="durationSelect">
+                <option value="1">1分</option>
+                <option value="3">3分</option>
+                <option value="5">5分</option>
+                <option value="10">10分</option>
+            </select>
+        </div>
 
-        <button id="startBtn">録画開始（暗転します）</button>
-        <p id="status" style="text-align: center; color: #666;"></p>
+        <button id="startBtn">録画を開始する</button>
+        <div id="status">準備完了</div>
     </div>
 
-    <div id="overlay">録画中...</div>
+    <div id="overlay"></div>
 
     <script>
-        // --- 設定項目 ---
+        // --- 1. Supabase設定 (ここを書き換えてください) ---
         const SUPABASE_URL = 'https://bbxtesuqsqwdokangvrj.supabase.co/rest/v1/'; 
         const SUPABASE_KEY = 'sb_publishable_Gg5g6_Ey4i64-uJ7579NiQ_2Q_uI9C8';
-        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        
+        let supabaseClient;
+        try {
+            supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+        } catch (e) {
+            document.getElementById('status').innerText = "Supabase初期化エラー: " + e.message;
+        }
 
         const startBtn = document.getElementById('startBtn');
         const overlay = document.getElementById('overlay');
@@ -54,76 +71,99 @@
 
         let mediaRecorder;
         let stream;
+        let isRecording = false;
 
-        async function uploadChunk(blob) {
-            const fileName = `video_${Date.now()}.mp4`;
-            status.innerText = `送信中: ${fileName}`;
+        // --- 2. アップロード処理 ---
+        async function uploadToSupabase(blob) {
+            const timestamp = new Date().getTime();
+            const fileName = `vid_${timestamp}.mp4`;
             
-            const { data, error } = await supabase.storage
-                .from('video') // Supabaseで作ったバケット名
-                .upload(`uploads/${fileName}`, blob);
+            status.innerText = `送信中... (${fileName})`;
+            
+            const { data, error } = await supabaseClient.storage
+                .from('video') // Supabaseで作ったバケット名と一致させてください
+                .upload(`uploads/${fileName}`, blob, {
+                    contentType: 'video/mp4'
+                });
 
-            if (error) console.error('Upload error:', error);
-            else console.log('Upload success:', data);
+            if (error) {
+                status.innerText = "送信エラー: " + error.message;
+            } else {
+                status.innerText = "送信完了: " + fileName;
+            }
         }
 
-        async function startRecording() {
+        // --- 3. 録画ロジック ---
+        async function runRecordingSession() {
             const cameraMode = document.getElementById('cameraSelect').value;
             const totalMinutes = parseInt(document.getElementById('durationSelect').value);
-            
+            let elapsedMinutes = 0;
+
             try {
+                // カメラ起動
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: cameraMode },
                     audio: true
                 });
 
+                isRecording = true;
                 overlay.style.display = 'flex';
                 startBtn.disabled = true;
-                
-                let elapsedMinutes = 0;
 
-                const recordLoop = () => {
-                    if (elapsedMinutes >= totalMinutes) {
-                        stopAll();
+                const startMinuteLoop = () => {
+                    if (elapsedMinutes >= totalMinutes || !isRecording) {
+                        finishSession();
                         return;
                     }
 
                     const chunks = [];
                     mediaRecorder = new MediaRecorder(stream);
 
-                    mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
-                    mediaRecorder.onstop = () => {
-                        const blob = new Blob(chunks, { type: 'video/mp4' });
-                        uploadChunk(blob); // 録画停止の度にアップロード実行
+                    mediaRecorder.ondataavailable = (e) => {
+                        if (e.data.size > 0) chunks.push(e.data);
                     };
 
-                    mediaRecorder.start();
-                    console.log(`${elapsedMinutes + 1}分目の録画開始`);
+                    mediaRecorder.onstop = () => {
+                        const videoBlob = new Blob(chunks, { type: 'video/mp4' });
+                        uploadToSupabase(videoBlob);
+                    };
 
+                    // 録画開始
+                    mediaRecorder.start();
+                    status.innerText = `${elapsedMinutes + 1}分目の録画中...`;
+
+                    // 1分(60000ms)後に停止して次へ
                     setTimeout(() => {
-                        mediaRecorder.stop();
-                        elapsedMinutes++;
-                        recordLoop(); // 次の1分へ
-                    }, 60000); // 1分(60000ms)ごとに区切る
+                        if (isRecording) {
+                            mediaRecorder.stop();
+                            elapsedMinutes++;
+                            startMinuteLoop();
+                        }
+                    }, 60000); 
                 };
 
-                recordLoop();
+                startMinuteLoop();
 
             } catch (err) {
-                alert("エラー: " + err.message);
-                stopAll();
+                status.innerText = "エラー: " + err.name + "\n" + err.message;
+                console.error(err);
+                finishSession();
             }
         }
 
-        function stopAll() {
+        function finishSession() {
+            isRecording = false;
             if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
             if (stream) stream.getTracks().forEach(track => track.stop());
             overlay.style.display = 'none';
             startBtn.disabled = false;
-            status.innerText = "録画完了";
         }
 
-        startBtn.addEventListener('click', startRecording);
+        // ボタンイベント
+        startBtn.addEventListener('click', () => {
+            status.innerText = "カメラを起動しています...";
+            runRecordingSession();
+        });
     </script>
 </body>
 </html>
