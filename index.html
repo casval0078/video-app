@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Video Uploader</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f0f0f0; }
+        .controls { display: flex; flex-direction: column; gap: 20px; width: 80%; max-width: 400px; }
+        button { padding: 15px; font-size: 16px; cursor: pointer; border-radius: 8px; border: none; background: #007bff; color: white; }
+        button:disabled { background: #ccc; }
+        select { padding: 10px; font-size: 16px; border-radius: 8px; }
+        /* 暗転用オーバーレイ */
+        #overlay {
+            display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: black; z-index: 9999; color: #333; display: none; align-items: center; justify-content: center;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="controls">
+        <h2>録画設定</h2>
+        <label>カメラ選択:</label>
+        <select id="cameraSelect">
+            <option value="environment">背面カメラ</option>
+            <option value="user">前面カメラ</option>
+        </select>
+
+        <label>録画時間:</label>
+        <select id="durationSelect">
+            <option value="1">1分</option>
+            <option value="3">3分</option>
+            <option value="5">5分</option>
+            <option value="10">10分</option>
+        </select>
+
+        <button id="startBtn">録画開始（暗転します）</button>
+        <p id="status" style="text-align: center; color: #666;"></p>
+    </div>
+
+    <div id="overlay">録画中...</div>
+
+    <script>
+        // --- 設定項目 ---
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL'; 
+        const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY';
+        const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+        const startBtn = document.getElementById('startBtn');
+        const overlay = document.getElementById('overlay');
+        const status = document.getElementById('status');
+
+        let mediaRecorder;
+        let stream;
+
+        async function uploadChunk(blob) {
+            const fileName = `video_${Date.now()}.mp4`;
+            status.innerText = `送信中: ${fileName}`;
+            
+            const { data, error } = await supabase.storage
+                .from('videos') // Supabaseで作ったバケット名
+                .upload(`uploads/${fileName}`, blob);
+
+            if (error) console.error('Upload error:', error);
+            else console.log('Upload success:', data);
+        }
+
+        async function startRecording() {
+            const cameraMode = document.getElementById('cameraSelect').value;
+            const totalMinutes = parseInt(document.getElementById('durationSelect').value);
+            
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: cameraMode },
+                    audio: true
+                });
+
+                overlay.style.display = 'flex';
+                startBtn.disabled = true;
+                
+                let elapsedMinutes = 0;
+
+                const recordLoop = () => {
+                    if (elapsedMinutes >= totalMinutes) {
+                        stopAll();
+                        return;
+                    }
+
+                    const chunks = [];
+                    mediaRecorder = new MediaRecorder(stream);
+
+                    mediaRecorder.ondataavailable = (e) => chunks.push(e.data);
+                    mediaRecorder.onstop = () => {
+                        const blob = new Blob(chunks, { type: 'video/mp4' });
+                        uploadChunk(blob); // 録画停止の度にアップロード実行
+                    };
+
+                    mediaRecorder.start();
+                    console.log(`${elapsedMinutes + 1}分目の録画開始`);
+
+                    setTimeout(() => {
+                        mediaRecorder.stop();
+                        elapsedMinutes++;
+                        recordLoop(); // 次の1分へ
+                    }, 60000); // 1分(60000ms)ごとに区切る
+                };
+
+                recordLoop();
+
+            } catch (err) {
+                alert("エラー: " + err.message);
+                stopAll();
+            }
+        }
+
+        function stopAll() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+            if (stream) stream.getTracks().forEach(track => track.stop());
+            overlay.style.display = 'none';
+            startBtn.disabled = false;
+            status.innerText = "録画完了";
+        }
+
+        startBtn.addEventListener('click', startRecording);
+    </script>
+</body>
+</html>
