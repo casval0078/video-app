@@ -60,7 +60,7 @@
             status.innerText = `送信中: ${fileName}`;
             
             const { data, error } = await supabase.storage
-                .from('videos') // Supabaseで作ったバケット名
+                .from('video') // Supabaseで作ったバケット名
                 .upload(`uploads/${fileName}`, blob);
 
             if (error) console.error('Upload error:', error);
