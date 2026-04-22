@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Video Uploader</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.7"></script>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f8f9fa; color: #333; }
         .container { width: 90%; max-width: 400px; background: white; padding: 25px; border-radius: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
@@ -80,17 +80,26 @@
             
             status.innerText = `送信中... (${fileName})`;
             
-            const { data, error } = await supabaseClient.storage
-                .from('video') // ここを単数形の 'video' に修正
-                .upload(fileName, blob, { // uploads/ を外して直接 fileName に
-                    contentType: 'video/mp4',
-                    upsert: false
-                });
+            try {
+                // supabaseClient.storage を明示的に使用
+                const { data, error } = await supabaseClient
+                    .storage
+                    .from('video') 
+                    .upload(fileName, blob, {
+                        contentType: 'video/mp4',
+                        cacheControl: '3600',
+                        upsert: false
+                    });
 
-            if (error) {
-                status.innerText = "送信エラー: " + error.message;
-            } else {
-                status.innerText = "送信完了: " + fileName;
+                if (error) {
+                    status.innerText = "送信エラー: " + error.message;
+                    console.error("Storage Error:", error);
+                } else {
+                    status.innerText = "送信完了: " + fileName;
+                }
+            } catch (err) {
+                status.innerText = "通信エラー: " + err.message;
+                console.error("Network Error:", err);
             }
         }
         // --- 3. 録画ロジック ---
