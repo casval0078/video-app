@@ -81,9 +81,10 @@
             status.innerText = `送信中... (${fileName})`;
             
             const { data, error } = await supabaseClient.storage
-                .from('video') // Supabaseで作ったバケット名と一致させてください
-                .upload(`uploads/${fileName}`, blob, {
-                    contentType: 'video/mp4'
+                .from('video') // ここを単数形の 'video' に修正
+                .upload(fileName, blob, { // uploads/ を外して直接 fileName に
+                    contentType: 'video/mp4',
+                    upsert: false
                 });
 
             if (error) {
@@ -92,7 +93,6 @@
                 status.innerText = "送信完了: " + fileName;
             }
         }
-
         // --- 3. 録画ロジック ---
         async function runRecordingSession() {
             const cameraMode = document.getElementById('cameraSelect').value;
